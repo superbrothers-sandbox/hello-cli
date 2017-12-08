@@ -219,7 +219,7 @@ __handle_command()
         next_command="_${last_command}_${words[c]//:/__}"
     else
         if [[ $c -eq 0 ]]; then
-            next_command="_$(basename "${words[c]//:/__}")"
+            next_command="_root_command"
         else
             next_command="_${words[c]//:/__}"
         fi
@@ -240,7 +240,10 @@ __handle_word()
         __handle_flag
     elif __contains_word "${words[c]}" "${commands[@]}"; then
         __handle_command
-    elif [[ $c -eq 0 ]] && __contains_word "$(basename "${words[c]}")" "${commands[@]}"; then
+    elif __contains_word "${words[c]}" "${command_aliases[@]}"; then
+        words[${c}]=${aliasHash[${words[c]}]}
+        __handle_command
+    elif [[ $c -eq 0 ]]; then
         __handle_command
     else
         __handle_noun
@@ -296,6 +299,7 @@ func writeCommands(buf *bytes.Buffer, cmd *Command) {
 			continue
 		}
 		buf.WriteString(fmt.Sprintf("    commands+=(%q)\n", c.Name()))
+		writeCmdAliases(buf, c)
 	}
 	buf.WriteString("\n")
 }
@@ -434,6 +438,16 @@ func writeRequiredNouns(buf *bytes.Buffer, cmd *Command) {
 	}
 }
 
+func writeCmdAliases(buf *bytes.Buffer, cmd *Command) {
+	sort.Sort(sort.StringSlice(cmd.Aliases))
+
+	for _, value := range cmd.Aliases {
+		buf.WriteString(fmt.Sprintf("    command_aliases+=(%q)\n", value))
+		buf.WriteString(fmt.Sprintf("    aliasHash[%q]=%q\n", value, cmd.Name()))
+	}
+	buf.WriteString("\n")
+}
+
 func writeArgAliases(buf *bytes.Buffer, cmd *Command) {
 	buf.WriteString("    noun_aliases=()\n")
 	sort.Sort(sort.StringSlice(cmd.ArgAliases))
@@ -452,8 +466,19 @@ func gen(buf *bytes.Buffer, cmd *Command) {
 	commandName := cmd.CommandPath()
 	commandName = strings.Replace(commandName, " ", "_", -1)
 	commandName = strings.Replace(commandName, ":", "__", -1)
-	buf.WriteString(fmt.Sprintf("_%s()\n{\n", commandName))
+
+	if cmd.Root() == cmd {
+		buf.WriteString(fmt.Sprint("_root_command()\n{\n"))
+	} else {
+		buf.WriteString(fmt.Sprintf("_%s()\n{\n", commandName))
+	}
+
 	buf.WriteString(fmt.Sprintf("    last_command=%q\n", commandName))
+	buf.WriteString("\n")
+	buf.WriteString(fmt.Sprintf("    declare -A aliasHash 2>/dev/null || :\n"))
+	buf.WriteString("    command_aliases=()\n")
+	buf.WriteString("\n")
+
 	writeCommands(buf, cmd)
 	writeFlags(buf, cmd)
 	writeRequiredFlag(buf, cmd)
